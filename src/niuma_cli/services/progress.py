@@ -16,6 +16,8 @@ def create_progress(
     todo_id: int | None = None,
     source: str = "manual",
     created_at: str | None = None,
+    started_at: str | None = None,
+    ended_at: str | None = None,
 ) -> int:
     """创建一条工作进度记录。"""
 
@@ -27,9 +29,9 @@ def create_progress(
     cursor = conn.execute(
         """
         INSERT INTO progress (project_id, todo_id, content, tag, source, started_at, ended_at, created_at)
-        VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (project_id, todo_id, normalized, tag, source, timestamp),
+        (project_id, todo_id, normalized, tag, source, started_at, ended_at, timestamp),
     )
     return int(cursor.lastrowid)
 

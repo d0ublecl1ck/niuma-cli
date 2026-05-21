@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlite3 import Connection
 
 from niuma_cli.config import ConfigStore
-from niuma_cli.services import progress, todos
+from niuma_cli.services import activity, progress, todos
 
 
 def list_tags(config_store: ConfigStore) -> list[str]:
@@ -31,7 +31,7 @@ def delete_tag(conn: Connection, config_store: ConfigStore, tag_name: str) -> li
     tags = config_store.load().tags
     if tag not in tags:
         raise ValueError(f"标签不存在: {tag}")
-    refs = todos.count_tag_references(conn, tag) + progress.count_tag_references(conn, tag)
+    refs = todos.count_tag_references(conn, tag) + progress.count_tag_references(conn, tag) + activity.count_tag_references(conn, tag)
     if refs:
         raise ValueError(f"标签 [{tag}] 正在被 {refs} 条记录使用，无法删除。请先执行 rename 迁移。")
     return config_store.save_tags([item for item in tags if item != tag]).tags
@@ -49,6 +49,7 @@ def rename_tag(conn: Connection, config_store: ConfigStore, old_name: str, new_n
         raise ValueError(f"标签已存在: {new_tag}")
     todos.rename_tag(conn, old_tag, new_tag)
     progress.rename_tag(conn, old_tag, new_tag)
+    activity.rename_tag(conn, old_tag, new_tag)
     return config_store.save_tags([new_tag if tag == old_tag else tag for tag in tags]).tags
 
 
