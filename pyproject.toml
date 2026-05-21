@@ -1,0 +1,23 @@
+[project]
+name = "niuma-cli"
+version = "0.1.0"
+description = "Local CLI for developer work logs, todos, progress records, and reports."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+niuma = "niuma_cli.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
