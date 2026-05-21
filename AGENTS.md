@@ -1,0 +1,1 @@
+- See docs/dev/config-recovery-and-tags.md for the configuration recovery and tag deletion regression note.
