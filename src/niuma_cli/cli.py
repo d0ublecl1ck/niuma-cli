@@ -11,7 +11,7 @@ from niuma_cli import __version__
 from niuma_cli.app import create_app_context
 from niuma_cli.interactive import choose_project_id, choose_tag
 from niuma_cli.output import render_table
-from niuma_cli.services import progress, projects, tags, todos
+from niuma_cli.services import activity, dailies, progress, projects, stats, tags, todos
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
     todo_done.add_argument("id", type=int)
     todo_list = todo_subparsers.add_parser("list", help="列出 Todo")
     todo_list.add_argument("date", nargs="?")
+    todo_focus = todo_subparsers.add_parser("focus", help="开始专注处理 Todo")
+    todo_focus.add_argument("id", type=int)
+    todo_focus_log = todo_subparsers.add_parser("focus-log", help="补录 Todo 专注时间")
+    todo_focus_log.add_argument("id", type=int)
+    todo_focus_log.add_argument("--from", dest="started_at")
+    todo_focus_log.add_argument("--to", dest="ended_at")
+    todo_focus_log.add_argument("--duration")
+    todo_subparsers.add_parser("stop", help="结束当前专注计时")
 
     progress_parser = subparsers.add_parser("progress", help="Progress 流水账")
     progress_subparsers = progress_parser.add_subparsers(dest="progress_command")
@@ -49,6 +57,21 @@ def build_parser() -> argparse.ArgumentParser:
     progress_log.add_argument("-t", "--tag")
     progress_list = progress_subparsers.add_parser("list", help="列出工作进展")
     progress_list.add_argument("date", nargs="?")
+
+    daily_parser = subparsers.add_parser("daily", help="日报生成")
+    daily_subparsers = daily_parser.add_subparsers(dest="daily_command")
+    daily_generate = daily_subparsers.add_parser("generate", help="生成日报")
+    daily_generate.add_argument("date", nargs="?")
+    daily_generate.add_argument("--week", action="store_true", help="生成本周周报")
+
+    chill_parser = subparsers.add_parser("chill", help="Chill 状态记录")
+    chill_subparsers = chill_parser.add_subparsers(dest="chill_command")
+    chill_start = chill_subparsers.add_parser("start", help="开始 Chill 记录")
+    chill_start.add_argument("content")
+    chill_subparsers.add_parser("end", help="结束 Chill 记录")
+
+    stats_parser = subparsers.add_parser("stats", help="统计与复盘")
+    stats_parser.add_argument("period", choices=["week", "month"])
 
     config_parser = subparsers.add_parser("config", help="配置管理")
     config_subparsers = config_parser.add_subparsers(dest="config_command")
@@ -99,6 +122,12 @@ def _dispatch(args: argparse.Namespace, context) -> int:
         return _handle_todo(args, context)
     if args.command == "progress":
         return _handle_progress(args, context)
+    if args.command == "daily":
+        return _handle_daily(args, context)
+    if args.command == "chill":
+        return _handle_chill(args, context)
+    if args.command == "stats":
+        return _handle_stats(args, context)
     if args.command == "config":
         return _handle_config(args, context)
     if args.command == "status":
@@ -145,6 +174,18 @@ def _handle_todo(args: argparse.Namespace, context) -> int:
             grouped = todos.list_todos(conn, args.date)
             print(_render_todo_sections(grouped))
             return 0
+        if args.todo_command == "focus":
+            activity.start_focus(conn, args.id)
+            print(f"专注已开始: Todo #{args.id}")
+            return 0
+        if args.todo_command == "focus-log":
+            finished = activity.log_focus(conn, args.id, args.started_at, args.ended_at, args.duration)
+            print(f"专注已补录，耗时 {finished.minutes} 分钟，并生成 Progress: #{finished.progress_id}")
+            return 0
+        if args.todo_command == "stop":
+            finished = activity.stop_focus(conn)
+            print(f"专注已结束，耗时 {finished.minutes} 分钟，并生成 Progress: #{finished.progress_id}")
+            return 0
     raise ValueError("请指定 todo 子命令")
 
 
@@ -180,17 +221,55 @@ def _handle_progress(args: argparse.Namespace, context) -> int:
     raise ValueError("请指定 progress 子命令")
 
 
+def _handle_daily(args: argparse.Namespace, context) -> int:
+    """处理日报生成命令。"""
+
+    with context.database.connect() as conn:
+        if args.daily_command == "generate":
+            if args.week:
+                report = dailies.generate_weekly(conn, args.date, context.config_store.load().llm)
+            else:
+                report = dailies.generate_daily(conn, args.date, context.config_store.load().llm)
+            print(report.content)
+            report_name = "周报" if args.week else "日报"
+            print(f"\n{report_name}已保存: #{report.daily_id}")
+            return 0
+    raise ValueError("请指定 daily 子命令")
+
+
+def _handle_chill(args: argparse.Namespace, context) -> int:
+    """处理 Chill 命令。"""
+
+    with context.database.connect() as conn:
+        if args.chill_command == "start":
+            activity.start_chill(conn, args.content)
+            print("Chill 已开始")
+            return 0
+        if args.chill_command == "end":
+            finished = activity.end_chill(conn)
+            print(f"Chill 已结束，耗时 {finished.minutes} 分钟，并生成 Progress: #{finished.progress_id}")
+            return 0
+    raise ValueError("请指定 chill 子命令")
+
+
+def _handle_stats(args: argparse.Namespace, context) -> int:
+    """处理统计命令。"""
+
+    with context.database.connect() as conn:
+        report = stats.build_stats(conn, args.period)
+    print(_render_stats_report(report))
+    return 0
+
+
 def _handle_config(args: argparse.Namespace, context) -> int:
     """处理配置命令。"""
 
     if args.config_command == "get":
-        print(context.config_store.get(args.key))
+        print(_display_config_value(args.key, context.config_store.get(args.key)))
         return 0
     if args.config_command == "set":
-        if args.key != "db.path":
-            raise KeyError(f"不支持的配置项: {args.key}")
-        config = context.config_store.set_db_path(args.value)
-        print(f"db.path 已更新: {config.db_path}")
+        context.config_store.set(args.key, args.value)
+        print(f"{args.key} 已更新: {_display_config_value(args.key, context.config_store.get(args.key))}")
         return 0
     if args.config_command == "reset":
         config = context.config_store.reset()
@@ -272,6 +351,25 @@ def _render_rows(headers: list[str], rows) -> str:
     if not materialized:
         return "暂无数据"
     return render_table(headers, materialized)
+
+
+def _render_stats_report(report: stats.StatsReport) -> str:
+    """渲染统计报告。"""
+
+    sections = [f"统计周期: {report.start_date} 至 {report.end_date}"]
+    sections.append("按标签完成 Todo")
+    sections.append(_render_rows(["标签", "完成数"], ((row["tag"], row["count"]) for row in report.tag_rows)))
+    sections.append("按项目工作进展")
+    sections.append(_render_rows(["项目", "进展数"], ((row["project_name"], row["count"]) for row in report.project_rows)))
+    return "\n\n".join(sections)
+
+
+def _display_config_value(key: str, value: str) -> str:
+    """渲染配置值，避免敏感配置进入终端日志。"""
+
+    if key == "llm.api_key" and value:
+        return "***"
+    return value
 
 
 if __name__ == "__main__":

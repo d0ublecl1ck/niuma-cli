@@ -4,12 +4,23 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_TAGS = ["Feature", "Bug", "Refactor", "Meeting", "Support", "Research"]
+DEFAULT_LLM_MODEL = "gpt-5.5"
+
+
+@dataclass(frozen=True)
+class LlmConfig:
+    """集中表达日报生成所需的大模型配置。"""
+
+    base_url: str | None
+    api_key: str | None
+    model: str
 
 
 @dataclass(frozen=True)
@@ -18,6 +29,7 @@ class AppConfig:
 
     db_path: Path
     tags: list[str]
+    llm: LlmConfig
 
 
 class ConfigStore:
@@ -40,7 +52,18 @@ class ConfigStore:
         raw = self._read_raw()
         db_path = Path(raw.get("db", {}).get("path") or self.default_db_path).expanduser()
         tags = raw["tags"] if "tags" in raw else DEFAULT_TAGS
-        return AppConfig(db_path=db_path, tags=list(dict.fromkeys(str(tag) for tag in tags if str(tag).strip())))
+        llm_raw = raw.get("llm", {})
+        llm = LlmConfig(
+            # 环境变量优先，避免必须把密钥写入配置文件。
+            base_url=os.environ.get("NIUMA_LLM_BASE_URL") or _optional_str(llm_raw.get("base_url")),
+            api_key=os.environ.get("NIUMA_LLM_API_KEY") or _optional_str(llm_raw.get("api_key")),
+            model=os.environ.get("NIUMA_LLM_MODEL") or _optional_str(llm_raw.get("model")) or DEFAULT_LLM_MODEL,
+        )
+        return AppConfig(
+            db_path=db_path,
+            tags=list(dict.fromkeys(str(tag) for tag in tags if str(tag).strip())),
+            llm=llm,
+        )
 
     def get(self, key: str) -> str:
         """读取支持的配置项。"""
@@ -48,15 +71,35 @@ class ConfigStore:
         config = self.load()
         if key == "db.path":
             return str(config.db_path)
+        if key == "llm.base_url":
+            return config.llm.base_url or ""
+        if key == "llm.api_key":
+            return config.llm.api_key or ""
+        if key == "llm.model":
+            return config.llm.model
         raise KeyError(f"不支持的配置项: {key}")
+
+    def set(self, key: str, value: str) -> AppConfig:
+        """保存支持的配置项。"""
+
+        raw = self._read_raw()
+        if key == "db.path":
+            raw.setdefault("db", {})["path"] = str(Path(value).expanduser())
+        elif key == "llm.base_url":
+            raw.setdefault("llm", {})["base_url"] = value.rstrip("/")
+        elif key == "llm.api_key":
+            raw.setdefault("llm", {})["api_key"] = value
+        elif key == "llm.model":
+            raw.setdefault("llm", {})["model"] = value
+        else:
+            raise KeyError(f"不支持的配置项: {key}")
+        self._write_raw(raw)
+        return self.load()
 
     def set_db_path(self, value: str) -> AppConfig:
         """保存数据库路径配置。"""
 
-        raw = self._read_raw()
-        raw.setdefault("db", {})["path"] = str(Path(value).expanduser())
-        self._write_raw(raw)
-        return self.load()
+        return self.set("db.path", value)
 
     def reset(self) -> AppConfig:
         """恢复默认配置，保留标签列表并重置数据库路径。"""
@@ -95,7 +138,24 @@ class ConfigStore:
 
         self.home_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = self.config_path.with_suffix(".json.tmp")
-        with tmp_path.open("w", encoding="utf-8") as file:
+        with open(tmp_path, "w", encoding="utf-8", opener=_private_file_opener) as file:
             json.dump(data, file, ensure_ascii=False, indent=2)
             file.write("\n")
+        tmp_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         tmp_path.replace(self.config_path)
+        self.config_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _optional_str(value: object) -> str | None:
+    """将配置值规范化为可选字符串。"""
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _private_file_opener(path: str, flags: int) -> int:
+    """以 0600 权限创建配置临时文件。"""
+
+    return os.open(path, flags, 0o600)

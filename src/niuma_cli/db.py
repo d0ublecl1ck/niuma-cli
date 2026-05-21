@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS dailies (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS active_sessions (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    kind TEXT NOT NULL CHECK (kind IN ('focus', 'chill')),
+    todo_id INTEGER REFERENCES todos(id) ON DELETE SET NULL,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    content TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    started_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
 CREATE INDEX IF NOT EXISTS idx_todos_completed_at ON todos(completed_at);
 CREATE INDEX IF NOT EXISTS idx_progress_created_at ON progress(created_at);
