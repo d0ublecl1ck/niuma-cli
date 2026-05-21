@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Local CLI for developer work logs, todos, progress records, and reports."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "prettytable>=3.17.0",
+]
 
 [project.scripts]
 niuma = "niuma_cli.cli:main"
