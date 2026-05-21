@@ -1,0 +1,4 @@
+interface:
+  display_name: "Niuma CLI"
+  short_description: "Develop and verify the niuma work-log CLI"
+  default_prompt: "Use $niuma-cli to implement and verify a niuma CLI workflow change."

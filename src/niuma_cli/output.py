@@ -4,20 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from prettytable import PrettyTable
+
 
 def render_table(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> str:
-    """渲染简单 ASCII 表格，保持终端输出可复制。"""
+    """使用 PrettyTable 渲染终端表格，保持输出宽度对齐。"""
 
-    normalized = [[str(cell) for cell in row] for row in rows]
-    widths = [len(header) for header in headers]
-    for row in normalized:
-        for index, cell in enumerate(row):
-            widths[index] = max(widths[index], len(cell))
-
-    border = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
-    header_line = "| " + " | ".join(header.ljust(widths[index]) for index, header in enumerate(headers)) + " |"
-    lines = [border, header_line, border]
-    for row in normalized:
-        lines.append("| " + " | ".join(cell.ljust(widths[index]) for index, cell in enumerate(row)) + " |")
-    lines.append(border)
-    return "\n".join(lines)
+    table = PrettyTable()
+    table.field_names = [str(header) for header in headers]
+    for row in rows:
+        table.add_row([str(cell) for cell in row])
+    return table.get_string()
