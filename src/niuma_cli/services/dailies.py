@@ -158,7 +158,7 @@ def _list_daily_progress(conn: Connection, day: str) -> list[Row]:
     return list(
         conn.execute(
             """
-            SELECT p.id, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
+            SELECT p.id, p.title, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
             FROM progress p
             LEFT JOIN projects pr ON pr.id = p.project_id
             WHERE date(p.created_at) = ? AND p.source != 'todo_done'
@@ -175,7 +175,7 @@ def _list_completed_todos(conn: Connection, day: str) -> list[Row]:
     return list(
         conn.execute(
             """
-            SELECT t.id, t.content, t.tag, t.completed_at, pr.name AS project_name
+            SELECT t.id, t.title, t.content, t.tag, t.completed_at, pr.name AS project_name
             FROM todos t
             LEFT JOIN projects pr ON pr.id = t.project_id
             WHERE date(t.completed_at) = ?
@@ -192,7 +192,7 @@ def _list_range_progress(conn: Connection, start_date: str, end_date: str) -> li
     return list(
         conn.execute(
             """
-            SELECT p.id, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
+            SELECT p.id, p.title, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
             FROM progress p
             LEFT JOIN projects pr ON pr.id = p.project_id
             WHERE date(p.created_at) BETWEEN ? AND ? AND p.source != 'todo_done'
@@ -209,7 +209,7 @@ def _list_range_completed_todos(conn: Connection, start_date: str, end_date: str
     return list(
         conn.execute(
             """
-            SELECT t.id, t.content, t.tag, t.completed_at, pr.name AS project_name
+            SELECT t.id, t.title, t.content, t.tag, t.completed_at, pr.name AS project_name
             FROM todos t
             LEFT JOIN projects pr ON pr.id = t.project_id
             WHERE date(t.completed_at) BETWEEN ? AND ?
@@ -248,13 +248,13 @@ def _compose_report(
     ]
     for index, row in enumerate(progress_rows, start=1):
         project = row["project_name"] or "未关联项目"
-        lines.append(f"{index}. [{project}][{row['tag']}] {row['content']}")
+        lines.append(f"{index}. [{project}][{row['tag']}] {_format_title_content(row)}")
 
     if completed_todos:
         lines.extend(["", "二、完成 Todo"])
         for index, row in enumerate(completed_todos, start=1):
             project = row["project_name"] or "未关联项目"
-            lines.append(f"{index}. [{project}][{row['tag']}] {row['content']}")
+            lines.append(f"{index}. [{project}][{row['tag']}] {_format_title_content(row)}")
 
     lines.extend(
         [
@@ -286,3 +286,11 @@ def _row_to_dict(row: Row) -> dict[str, object]:
     """将 SQLite Row 转成可序列化字典。"""
 
     return {key: row[key] for key in row.keys()}
+
+
+def _format_title_content(row: Row) -> str:
+    """把标题和可选详情合成为适合日报的单行文本。"""
+
+    if row["content"]:
+        return f"{row['title']}：{row['content']}"
+    return str(row["title"])

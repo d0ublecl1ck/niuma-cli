@@ -12,9 +12,11 @@ uv sync
 
 ```bash
 uv run niuma project create 电商系统
+uv run niuma project rename 1 支付系统
 uv run niuma project list
 
-uv run niuma todo add "修复登录页验证码报错" -p 1 -t Bug
+uv run niuma todo add "修复登录页验证码报错" --content "复现路径、影响范围和下一步处理计划" -p 1 -t Bug
+uv run niuma todo modify 1 --title "修复登录页验证码重试报错" --content "已确认错误恢复路径" -p 1 -t Bug
 uv run niuma todo done 1
 uv run niuma todo list
 uv run niuma todo focus 1
@@ -22,7 +24,8 @@ uv run niuma todo stop
 uv run niuma todo focus-log 1 --from "09:30" --to "11:30"
 uv run niuma todo focus-log 1 --duration "2h"
 
-uv run niuma progress log "和前端联调支付接口" -p 1 -t Feature
+uv run niuma progress log "完成支付接口联调" --content "覆盖下单、回调和异常重试链路" -p 1 -t Feature
+uv run niuma progress modify 1 --title "完成支付接口回归" --content "已补齐回调失败场景" -p 1 -t Feature
 uv run niuma progress list
 
 uv run niuma daily generate

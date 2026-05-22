@@ -30,6 +30,27 @@ def list_projects(conn: Connection) -> list[Row]:
     return list(conn.execute("SELECT id, name, created_at, updated_at FROM projects ORDER BY id ASC"))
 
 
+def rename_project(conn: Connection, project_id: int, name: str) -> tuple[str, str]:
+    """重命名项目，并返回旧名称与新名称。"""
+
+    normalized = name.strip()
+    if not normalized:
+        raise ValueError("项目名称不能为空")
+
+    project = get_project(conn, project_id)
+    if project is None:
+        raise ValueError(f"项目不存在: {project_id}")
+
+    try:
+        conn.execute(
+            "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
+            (normalized, now_text(), project_id),
+        )
+    except IntegrityError as exc:
+        raise ValueError(f"项目已存在: {normalized}") from exc
+    return str(project["name"]), normalized
+
+
 def get_project(conn: Connection, project_id: int | None) -> Row | None:
     """按 ID 查询项目，空 ID 直接返回 None。"""
 

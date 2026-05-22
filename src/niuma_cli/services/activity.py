@@ -19,7 +19,7 @@ class FinishedSession:
 
     progress_id: int
     minutes: int
-    content: str
+    title: str
 
 
 def start_focus(conn: Connection, todo_id: int) -> None:
@@ -27,7 +27,7 @@ def start_focus(conn: Connection, todo_id: int) -> None:
 
     _ensure_no_active_session(conn)
     todo = conn.execute(
-        "SELECT id, project_id, content, tag, status FROM todos WHERE id = ?",
+        "SELECT id, project_id, title, content, tag, status FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if todo is None:
@@ -39,7 +39,7 @@ def start_focus(conn: Connection, todo_id: int) -> None:
         INSERT INTO active_sessions (id, kind, todo_id, project_id, content, tag, started_at)
         VALUES (1, 'focus', ?, ?, ?, ?, ?)
         """,
-        (todo["id"], todo["project_id"], todo["content"], todo["tag"], now_text()),
+        (todo["id"], todo["project_id"], todo["title"], todo["tag"], now_text()),
     )
 
 
@@ -55,10 +55,11 @@ def log_focus(
     todo = _require_pending_todo(conn, todo_id)
     started_at, ended_at = _resolve_manual_time_range(started_at_text, ended_at_text, duration_text)
     minutes = minutes_between(started_at, ended_at)
-    content = f"【专注补录】耗时 {minutes} 分钟推进了该任务：{todo['content']}"
+    title = f"【专注补录】耗时 {minutes} 分钟推进了该任务：{todo['title']}"
     progress_id = create_progress(
         conn=conn,
-        content=content,
+        title=title,
+        content=todo["content"],
         tag=todo["tag"],
         project_id=todo["project_id"],
         todo_id=todo["id"],
@@ -67,7 +68,7 @@ def log_focus(
         started_at=started_at,
         ended_at=ended_at,
     )
-    return FinishedSession(progress_id=progress_id, minutes=minutes, content=content)
+    return FinishedSession(progress_id=progress_id, minutes=minutes, title=title)
 
 
 def stop_focus(conn: Connection) -> FinishedSession:
@@ -76,10 +77,10 @@ def stop_focus(conn: Connection) -> FinishedSession:
     session = _require_active_session(conn, "focus")
     ended_at = now_text()
     minutes = minutes_between(session["started_at"], ended_at)
-    content = f"【专注】耗时 {minutes} 分钟推进了该任务：{session['content']}"
+    title = f"【专注】耗时 {minutes} 分钟推进了该任务：{session['content']}"
     progress_id = create_progress(
         conn=conn,
-        content=content,
+        title=title,
         tag=session["tag"],
         project_id=session["project_id"],
         todo_id=session["todo_id"],
@@ -89,7 +90,7 @@ def stop_focus(conn: Connection) -> FinishedSession:
         ended_at=ended_at,
     )
     _clear_active_session(conn)
-    return FinishedSession(progress_id=progress_id, minutes=minutes, content=content)
+    return FinishedSession(progress_id=progress_id, minutes=minutes, title=title)
 
 
 def start_chill(conn: Connection, content: str) -> None:
@@ -114,10 +115,10 @@ def end_chill(conn: Connection) -> FinishedSession:
     session = _require_active_session(conn, "chill")
     ended_at = now_text()
     minutes = minutes_between(session["started_at"], ended_at)
-    content = f"【Chill】耗时 {minutes} 分钟：{session['content']}"
+    title = f"【Chill】耗时 {minutes} 分钟：{session['content']}"
     progress_id = create_progress(
         conn=conn,
-        content=content,
+        title=title,
         tag=session["tag"],
         source="chill",
         created_at=ended_at,
@@ -125,7 +126,7 @@ def end_chill(conn: Connection) -> FinishedSession:
         ended_at=ended_at,
     )
     _clear_active_session(conn)
-    return FinishedSession(progress_id=progress_id, minutes=minutes, content=content)
+    return FinishedSession(progress_id=progress_id, minutes=minutes, title=title)
 
 
 def _ensure_no_active_session(conn: Connection) -> None:
@@ -140,7 +141,7 @@ def _require_pending_todo(conn: Connection, todo_id: int):
     """读取可补录专注时间的 Todo。"""
 
     todo = conn.execute(
-        "SELECT id, project_id, content, tag, status FROM todos WHERE id = ?",
+        "SELECT id, project_id, title, content, tag, status FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if todo is None:

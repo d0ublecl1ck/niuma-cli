@@ -12,19 +12,20 @@ from niuma_cli.time_utils import now_text, validate_date
 TODO_DONE_PROGRESS_PREFIX = "【已完成 Todo】"
 
 
-def create_todo(conn: Connection, content: str, tag: str, project_id: int | None = None) -> int:
-    """创建待办任务。"""
+def create_todo(conn: Connection, title: str, tag: str, project_id: int | None = None, content: str | None = None) -> int:
+    """创建待办任务，标题必填，内容详情可选。"""
 
-    normalized = content.strip()
-    if not normalized:
-        raise ValueError("Todo 内容不能为空")
+    normalized_title = title.strip()
+    normalized_content = _normalize_optional_content(content)
+    if not normalized_title:
+        raise ValueError("Todo 标题不能为空")
     require_project(conn, project_id)
     cursor = conn.execute(
         """
-        INSERT INTO todos (project_id, content, tag, status, created_at, completed_at)
-        VALUES (?, ?, ?, 'pending', ?, NULL)
+        INSERT INTO todos (project_id, title, content, tag, status, created_at, completed_at)
+        VALUES (?, ?, ?, ?, 'pending', ?, NULL)
         """,
-        (project_id, normalized, tag, now_text()),
+        (project_id, normalized_title, normalized_content, tag, now_text()),
     )
     return int(cursor.lastrowid)
 
@@ -33,7 +34,7 @@ def complete_todo(conn: Connection, todo_id: int) -> int:
     """完成 Todo，并自动物化为 Progress 流水账。"""
 
     todo = conn.execute(
-        "SELECT id, project_id, content, tag, status FROM todos WHERE id = ?",
+        "SELECT id, project_id, title, content, tag, status FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if todo is None:
@@ -48,13 +49,55 @@ def complete_todo(conn: Connection, todo_id: int) -> int:
     )
     return create_progress(
         conn=conn,
-        content=f"{TODO_DONE_PROGRESS_PREFIX}{todo['content']}",
+        title=f"{TODO_DONE_PROGRESS_PREFIX}{todo['title']}",
+        content=todo["content"],
         tag=todo["tag"],
         project_id=todo["project_id"],
         todo_id=todo["id"],
         source="todo_done",
         created_at=timestamp,
     )
+
+
+def modify_todo(
+    conn: Connection,
+    todo_id: int,
+    title: str | None = None,
+    content: str | None = None,
+    tag: str | None = None,
+    project_id: int | None = None,
+    change_project: bool = False,
+) -> None:
+    """按需更新 Todo 标题、内容详情、标签和项目关联。"""
+
+    todo = conn.execute("SELECT id FROM todos WHERE id = ?", (todo_id,)).fetchone()
+    if todo is None:
+        raise ValueError(f"Todo 不存在: {todo_id}")
+    if title is None and content is None and tag is None and not change_project:
+        raise ValueError("请至少提供一个要更新的 Todo 字段")
+
+    updates: list[str] = []
+    params: list[object] = []
+    if title is not None:
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise ValueError("Todo 标题不能为空")
+        updates.append("title = ?")
+        params.append(normalized_title)
+    if content is not None:
+        normalized = _normalize_optional_content(content)
+        updates.append("content = ?")
+        params.append(normalized)
+    if tag is not None:
+        updates.append("tag = ?")
+        params.append(tag)
+    if change_project:
+        require_project(conn, project_id)
+        updates.append("project_id = ?")
+        params.append(project_id)
+
+    params.append(todo_id)
+    conn.execute(f"UPDATE todos SET {', '.join(updates)} WHERE id = ?", params)
 
 
 def list_todos(conn: Connection, date_text: str | None = None) -> dict[str, list[Row]]:
@@ -98,7 +141,7 @@ def _query_todos(conn: Connection, where_clause: str, params: tuple[object, ...]
     return list(
         conn.execute(
             f"""
-            SELECT t.id, t.content, t.tag, t.status, t.created_at, t.completed_at, p.name AS project_name
+            SELECT t.id, t.title, t.content, t.tag, t.status, t.created_at, t.completed_at, p.name AS project_name
             FROM todos t
             LEFT JOIN projects p ON p.id = t.project_id
             WHERE {where_clause}
@@ -107,3 +150,12 @@ def _query_todos(conn: Connection, where_clause: str, params: tuple[object, ...]
             params,
         )
     )
+
+
+def _normalize_optional_content(content: str | None) -> str | None:
+    """规范化可选详情，空白详情按未填写处理。"""
+
+    if content is None:
+        return None
+    normalized = content.strip()
+    return normalized or None

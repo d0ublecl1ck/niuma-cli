@@ -25,6 +25,19 @@ Use this skill to work on the `niuma-cli` repository without rediscovering its c
 6. Update `README.md` when commands, examples, configuration keys, or install/verification steps change.
 7. Update `docs/dev/` and the project `AGENTS.md` index when fixing a confirmed regression with reusable prevention value.
 
+## Command Model
+
+- `project create|rename|list` manages projects.
+- `todo add|modify|done|list|focus|focus-log|stop` manages todos and focus records.
+- `progress log|modify|list` manages progress records.
+- `todo add <title>` and `progress log <title>` require a concise title and accept optional `--content` details.
+- `todo modify` and `progress modify` update title, content, tag, and project association when `--title`, `--content`, `--tag`, or `--project-id` is provided.
+- Split Todo and Progress records atomically by independently understandable work outcome; avoid bundling multiple unrelated changes, fixes, docs, and verification items into one broad record.
+- Before creating Todo or Progress records, run or inspect `project list` when the target project is not certain, then prefer passing `--project-id` so records do not fall into the unassociated project bucket.
+- Strongly recommend writing `--content` for Todo and Progress entries; use `title` for the short outcome-oriented summary and `content` for important context, scope, blockers, evidence, or follow-up details.
+- Prefer concise user-value titles over implementation dumps: `完成大宗原材料可比降低率业务口径开发` is better than a long PR-style implementation summary with every file, test, version, and compatibility detail.
+- `project rename` updates the project name in place, so related Todo and Progress list output shows the new project name through joins.
+
 ## Boundaries
 
 - Preserve Chinese user-facing CLI output and test assertions unless the task explicitly changes copy.
@@ -43,4 +56,9 @@ uv run pytest
 uv run pytest tests/test_cli.py -k 'config or tag'
 NIUMA_HOME="$(mktemp -d)" uv run niuma status
 NIUMA_HOME="$(mktemp -d)" uv run niuma project create 电商系统
+NIUMA_HOME="$(mktemp -d)" uv run niuma project rename 1 支付系统
+NIUMA_HOME="$(mktemp -d)" uv run niuma todo add "修复登录页验证码报错" --content "复现路径、影响范围和下一步处理计划" -p 1 -t Bug
+NIUMA_HOME="$(mktemp -d)" uv run niuma todo modify 1 --title "修复登录页验证码重试报错" --content "已确认错误恢复路径" -p 1 -t Bug
+NIUMA_HOME="$(mktemp -d)" uv run niuma progress log "完成支付接口联调" --content "覆盖下单、回调和异常重试链路" -p 1 -t Feature
+NIUMA_HOME="$(mktemp -d)" uv run niuma progress modify 1 --title "完成支付接口回归" --content "已补齐回调失败场景" -p 1 -t Feature
 ```

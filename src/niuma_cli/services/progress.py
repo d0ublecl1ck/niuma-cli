@@ -10,7 +10,7 @@ from niuma_cli.time_utils import now_text, validate_date
 
 def create_progress(
     conn: Connection,
-    content: str,
+    title: str,
     tag: str,
     project_id: int | None = None,
     todo_id: int | None = None,
@@ -18,20 +18,22 @@ def create_progress(
     created_at: str | None = None,
     started_at: str | None = None,
     ended_at: str | None = None,
+    content: str | None = None,
 ) -> int:
-    """创建一条工作进度记录。"""
+    """创建一条工作进度记录，标题必填，内容详情可选。"""
 
-    normalized = content.strip()
-    if not normalized:
-        raise ValueError("Progress 内容不能为空")
+    normalized_title = title.strip()
+    normalized_content = _normalize_optional_content(content)
+    if not normalized_title:
+        raise ValueError("Progress 标题不能为空")
     require_project(conn, project_id)
     timestamp = created_at or now_text()
     cursor = conn.execute(
         """
-        INSERT INTO progress (project_id, todo_id, content, tag, source, started_at, ended_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO progress (project_id, todo_id, title, content, tag, source, started_at, ended_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (project_id, todo_id, normalized, tag, source, started_at, ended_at, timestamp),
+        (project_id, todo_id, normalized_title, normalized_content, tag, source, started_at, ended_at, timestamp),
     )
     return int(cursor.lastrowid)
 
@@ -43,7 +45,7 @@ def list_progress(conn: Connection, date_text: str | None = None) -> list[Row]:
     return list(
         conn.execute(
             """
-            SELECT p.id, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
+            SELECT p.id, p.title, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
             FROM progress p
             LEFT JOIN projects pr ON pr.id = p.project_id
             WHERE date(p.created_at) = ?
@@ -52,6 +54,47 @@ def list_progress(conn: Connection, date_text: str | None = None) -> list[Row]:
             (day,),
         )
     )
+
+
+def modify_progress(
+    conn: Connection,
+    progress_id: int,
+    title: str | None = None,
+    content: str | None = None,
+    tag: str | None = None,
+    project_id: int | None = None,
+    change_project: bool = False,
+) -> None:
+    """按需更新 Progress 标题、内容详情、标签和项目关联。"""
+
+    progress = conn.execute("SELECT id FROM progress WHERE id = ?", (progress_id,)).fetchone()
+    if progress is None:
+        raise ValueError(f"Progress 不存在: {progress_id}")
+    if title is None and content is None and tag is None and not change_project:
+        raise ValueError("请至少提供一个要更新的 Progress 字段")
+
+    updates: list[str] = []
+    params: list[object] = []
+    if title is not None:
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise ValueError("Progress 标题不能为空")
+        updates.append("title = ?")
+        params.append(normalized_title)
+    if content is not None:
+        normalized = _normalize_optional_content(content)
+        updates.append("content = ?")
+        params.append(normalized)
+    if tag is not None:
+        updates.append("tag = ?")
+        params.append(tag)
+    if change_project:
+        require_project(conn, project_id)
+        updates.append("project_id = ?")
+        params.append(project_id)
+
+    params.append(progress_id)
+    conn.execute(f"UPDATE progress SET {', '.join(updates)} WHERE id = ?", params)
 
 
 def count_tag_references(conn: Connection, tag: str) -> int:
@@ -65,3 +108,12 @@ def rename_tag(conn: Connection, old_name: str, new_name: str) -> None:
     """迁移 Progress 历史标签。"""
 
     conn.execute("UPDATE progress SET tag = ? WHERE tag = ?", (new_name, old_name))
+
+
+def _normalize_optional_content(content: str | None) -> str | None:
+    """规范化可选详情，空白详情按未填写处理。"""
+
+    if content is None:
+        return None
+    normalized = content.strip()
+    return normalized or None
