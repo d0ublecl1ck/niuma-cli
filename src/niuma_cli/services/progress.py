@@ -56,6 +56,24 @@ def list_progress(conn: Connection, date_text: str | None = None) -> list[Row]:
     )
 
 
+def get_progress(conn: Connection, progress_id: int) -> Row:
+    """读取单条 Progress 完整内容，供详情命令展示。"""
+
+    row = conn.execute(
+        """
+        SELECT p.id, p.todo_id, p.title, p.content, p.tag, p.source, p.started_at, p.ended_at, p.created_at,
+               pr.name AS project_name
+        FROM progress p
+        LEFT JOIN projects pr ON pr.id = p.project_id
+        WHERE p.id = ?
+        """,
+        (progress_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"Progress 不存在: {progress_id}")
+    return row
+
+
 def modify_progress(
     conn: Connection,
     progress_id: int,
