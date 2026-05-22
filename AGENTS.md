@@ -1,1 +1,2 @@
 - See docs/dev/config-recovery-and-tags.md for the configuration recovery and tag deletion regression note.
+- Always update the project skill when changing niuma-cli commands, behavior, tests, docs, or reusable workflow guidance.

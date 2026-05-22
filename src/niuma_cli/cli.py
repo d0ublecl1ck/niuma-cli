@@ -28,16 +28,26 @@ def build_parser() -> argparse.ArgumentParser:
     project_subparsers = project_parser.add_subparsers(dest="project_command")
     project_create = project_subparsers.add_parser("create", help="创建项目")
     project_create.add_argument("name")
+    project_rename = project_subparsers.add_parser("rename", help="重命名项目")
+    project_rename.add_argument("id", type=int)
+    project_rename.add_argument("name")
     project_subparsers.add_parser("list", help="列出项目")
 
     todo_parser = subparsers.add_parser("todo", help="Todo 管理")
     todo_subparsers = todo_parser.add_subparsers(dest="todo_command")
     todo_add = todo_subparsers.add_parser("add", help="创建 Todo")
-    todo_add.add_argument("content")
+    todo_add.add_argument("title")
+    todo_add.add_argument("--content")
     todo_add.add_argument("-p", "--project-id", type=int)
     todo_add.add_argument("-t", "--tag")
     todo_done = todo_subparsers.add_parser("done", help="完成 Todo")
     todo_done.add_argument("id", type=int)
+    todo_modify = todo_subparsers.add_parser("modify", help="修改 Todo")
+    todo_modify.add_argument("id", type=int)
+    todo_modify.add_argument("--title")
+    todo_modify.add_argument("--content")
+    todo_modify.add_argument("-p", "--project-id", type=int)
+    todo_modify.add_argument("-t", "--tag")
     todo_list = todo_subparsers.add_parser("list", help="列出 Todo")
     todo_list.add_argument("date", nargs="?")
     todo_focus = todo_subparsers.add_parser("focus", help="开始专注处理 Todo")
@@ -52,9 +62,16 @@ def build_parser() -> argparse.ArgumentParser:
     progress_parser = subparsers.add_parser("progress", help="Progress 流水账")
     progress_subparsers = progress_parser.add_subparsers(dest="progress_command")
     progress_log = progress_subparsers.add_parser("log", help="记录工作进展")
-    progress_log.add_argument("content")
+    progress_log.add_argument("title")
+    progress_log.add_argument("--content")
     progress_log.add_argument("-p", "--project-id", type=int)
     progress_log.add_argument("-t", "--tag")
+    progress_modify = progress_subparsers.add_parser("modify", help="修改工作进展")
+    progress_modify.add_argument("id", type=int)
+    progress_modify.add_argument("--title")
+    progress_modify.add_argument("--content")
+    progress_modify.add_argument("-p", "--project-id", type=int)
+    progress_modify.add_argument("-t", "--tag")
     progress_list = progress_subparsers.add_parser("list", help="列出工作进展")
     progress_list.add_argument("date", nargs="?")
 
@@ -149,6 +166,10 @@ def _handle_project(args: argparse.Namespace, context) -> int:
             project_id = projects.create_project(conn, args.name)
             print(f"项目已创建: #{project_id} {args.name}")
             return 0
+        if args.project_command == "rename":
+            old_name, new_name = projects.rename_project(conn, args.id, args.name)
+            print(f"项目已重命名: #{args.id} {old_name} -> {new_name}")
+            return 0
         if args.project_command == "list":
             rows = projects.list_projects(conn)
             print(_render_rows(["ID", "项目", "创建时间"], ((row["id"], row["name"], row["created_at"]) for row in rows)))
@@ -163,12 +184,25 @@ def _handle_todo(args: argparse.Namespace, context) -> int:
         if args.todo_command == "add":
             tag = tags.validate_tag(context.config_store, choose_tag(tags.list_tags(context.config_store), args.tag))
             project_id = choose_project_id(projects.list_projects(conn), args.project_id)
-            todo_id = todos.create_todo(conn, args.content, tag, project_id)
+            todo_id = todos.create_todo(conn, args.title, tag, project_id, content=args.content)
             print(f"Todo 已创建: #{todo_id}")
             return 0
         if args.todo_command == "done":
             progress_id = todos.complete_todo(conn, args.id)
             print(f"Todo 已完成，并生成 Progress: #{progress_id}")
+            return 0
+        if args.todo_command == "modify":
+            tag = _validate_optional_tag(context, args.tag)
+            todos.modify_todo(
+                conn,
+                args.id,
+                title=args.title,
+                content=args.content,
+                tag=tag,
+                project_id=args.project_id,
+                change_project=args.project_id is not None,
+            )
+            print(f"Todo 已更新: #{args.id}")
             return 0
         if args.todo_command == "list":
             grouped = todos.list_todos(conn, args.date)
@@ -196,14 +230,27 @@ def _handle_progress(args: argparse.Namespace, context) -> int:
         if args.progress_command == "log":
             tag = tags.validate_tag(context.config_store, choose_tag(tags.list_tags(context.config_store), args.tag))
             project_id = choose_project_id(projects.list_projects(conn), args.project_id)
-            progress_id = progress.create_progress(conn, args.content, tag, project_id)
+            progress_id = progress.create_progress(conn, args.title, tag, project_id, content=args.content)
             print(f"Progress 已记录: #{progress_id}")
+            return 0
+        if args.progress_command == "modify":
+            tag = _validate_optional_tag(context, args.tag)
+            progress.modify_progress(
+                conn,
+                args.id,
+                title=args.title,
+                content=args.content,
+                tag=tag,
+                project_id=args.project_id,
+                change_project=args.project_id is not None,
+            )
+            print(f"Progress 已更新: #{args.id}")
             return 0
         if args.progress_command == "list":
             rows = progress.list_progress(conn, args.date)
             print(
                 _render_rows(
-                    ["ID", "时间", "项目", "标签", "来源", "内容"],
+                    ["ID", "时间", "项目", "标签", "来源", "标题", "内容"],
                     (
                         (
                             row["id"],
@@ -211,6 +258,7 @@ def _handle_progress(args: argparse.Namespace, context) -> int:
                             row["project_name"] or "-",
                             row["tag"],
                             row["source"],
+                            row["title"],
                             row["content"],
                         )
                         for row in rows
@@ -235,6 +283,14 @@ def _handle_daily(args: argparse.Namespace, context) -> int:
             print(f"\n{report_name}已保存: #{report.daily_id}")
             return 0
     raise ValueError("请指定 daily 子命令")
+
+
+def _validate_optional_tag(context, tag: str | None) -> str | None:
+    """只在用户传入标签时校验标签，未传入时保持原值。"""
+
+    if tag is None:
+        return None
+    return tags.validate_tag(context.config_store, tag)
 
 
 def _handle_chill(args: argparse.Namespace, context) -> int:
@@ -337,8 +393,11 @@ def _render_todo_sections(grouped: dict[str, list[Row]]) -> str:
         sections.append(names[key])
         sections.append(
             _render_rows(
-                ["ID", "项目", "标签", "状态", "内容"],
-                ((row["id"], row["project_name"] or "-", row["tag"], row["status"], row["content"]) for row in rows),
+                ["ID", "项目", "标签", "状态", "标题", "内容"],
+                (
+                    (row["id"], row["project_name"] or "-", row["tag"], row["status"], row["title"], row["content"] or "-")
+                    for row in rows
+                ),
             )
         )
     return "\n\n".join(sections)

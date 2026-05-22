@@ -47,6 +47,135 @@ def test_tag_rename_migrates_history(tmp_path: Path, monkeypatch, capsys) -> Non
     assert "Feature" not in output.split("标签已重命名: Feature -> Frontend", maxsplit=1)[-1]
 
 
+def test_project_rename_updates_project_name_in_related_lists(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证项目重命名后，关联 Todo 和 Progress 展示新项目名。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["project", "create", "旧项目"]) == 0
+    assert main(["todo", "add", "接入支付回调", "-p", "1", "-t", "Feature"]) == 0
+    assert main(["progress", "log", "完成支付回调联调", "-p", "1", "-t", "Feature"]) == 0
+    assert main(["project", "rename", "1", "新项目"]) == 0
+    assert main(["todo", "list"]) == 0
+    assert main(["progress", "list"]) == 0
+
+    output = capsys.readouterr().out
+    assert "项目已重命名: #1 旧项目 -> 新项目" in output
+    assert "新项目" in output
+    assert "旧项目" not in output.split("项目已重命名: #1 旧项目 -> 新项目", maxsplit=1)[-1]
+
+
+def test_todo_modify_updates_title_content_tag_and_project(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 Todo modify 可以更新标题、内容、标签和项目关联。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["project", "create", "旧项目"]) == 0
+    assert main(["project", "create", "新项目"]) == 0
+    assert main(["todo", "add", "旧 Todo", "--content", "旧详情", "-p", "1", "-t", "Feature"]) == 0
+    assert main(["todo", "modify", "1", "--title", "新 Todo", "--content", "新详情", "--tag", "Bug", "--project-id", "2"]) == 0
+    assert main(["todo", "list"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Todo 已更新: #1" in output
+    assert "新 Todo" in output
+    assert "新详情" in output
+    assert "Bug" in output
+    assert "新项目" in output
+    assert "旧 Todo" not in output.split("Todo 已更新: #1", maxsplit=1)[-1]
+    assert "旧详情" not in output.split("Todo 已更新: #1", maxsplit=1)[-1]
+
+
+def test_progress_modify_updates_title_content_tag_and_project(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 Progress modify 可以更新标题、内容、标签和项目关联。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["project", "create", "旧项目"]) == 0
+    assert main(["project", "create", "新项目"]) == 0
+    assert main(["progress", "log", "旧进展", "--content", "旧详情", "-p", "1", "-t", "Feature"]) == 0
+    assert main(["progress", "modify", "1", "--title", "新进展", "--content", "新详情", "--tag", "Bug", "--project-id", "2"]) == 0
+    assert main(["progress", "list"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Progress 已更新: #1" in output
+    assert "新进展" in output
+    assert "新详情" in output
+    assert "Bug" in output
+    assert "新项目" in output
+    assert "旧进展" not in output.split("Progress 已更新: #1", maxsplit=1)[-1]
+    assert "旧详情" not in output.split("Progress 已更新: #1", maxsplit=1)[-1]
+
+
+def test_modify_requires_at_least_one_field(tmp_path: Path, monkeypatch) -> None:
+    """验证 modify 必须提供至少一个可更新字段，避免无意义写入。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["todo", "add", "保留原 Todo", "-t", "Feature"]) == 0
+    assert main(["progress", "log", "保留原进展", "-t", "Feature"]) == 0
+    assert main(["todo", "modify", "1"]) == 1
+    assert main(["progress", "modify", "1"]) == 1
+
+
+def test_existing_todo_and_progress_content_migrates_to_title(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证旧库里的 content 字段会迁移为 title，content 详情保持为空。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+    db_path = tmp_path / "niuma.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE todos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                content TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('pending', 'done')),
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            CREATE TABLE progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                todo_id INTEGER REFERENCES todos(id) ON DELETE SET NULL,
+                content TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                source TEXT NOT NULL,
+                started_at TEXT,
+                ended_at TEXT,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO todos (content, tag, status, created_at, completed_at) VALUES (?, ?, 'pending', ?, NULL)",
+            ("旧 Todo 内容", "Feature", "2026-05-22 09:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO progress (content, tag, source, created_at) VALUES (?, ?, 'manual', ?)",
+            ("旧 Progress 内容", "Feature", "2026-05-22 09:10:00"),
+        )
+
+    assert main(["todo", "list", "2026-05-22"]) == 0
+    assert main(["progress", "list", "2026-05-22"]) == 0
+
+    output = capsys.readouterr().out
+    assert "旧 Todo 内容" in output
+    assert "旧 Progress 内容" in output
+    with sqlite3.connect(db_path) as conn:
+        todo_row = conn.execute("SELECT title, content FROM todos WHERE id = 1").fetchone()
+        progress_row = conn.execute("SELECT title, content FROM progress WHERE id = 1").fetchone()
+    assert todo_row == ("旧 Todo 内容", None)
+    assert progress_row == ("旧 Progress 内容", None)
+
+
 def test_config_reset_recovers_from_bad_database_path(tmp_path: Path, monkeypatch) -> None:
     """验证数据库路径配坏后仍可通过 config reset 恢复。"""
 
