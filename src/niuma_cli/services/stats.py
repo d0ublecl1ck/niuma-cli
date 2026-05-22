@@ -41,7 +41,7 @@ def build_stats(conn: Connection, period: str) -> StatsReport:
             SELECT COALESCE(pr.name, '未关联项目') AS project_name, COUNT(*) AS count
             FROM progress p
             LEFT JOIN projects pr ON pr.id = p.project_id
-            WHERE date(p.created_at) BETWEEN ? AND ?
+            WHERE date(p.happened_at) BETWEEN ? AND ?
             GROUP BY COALESCE(pr.name, '未关联项目')
             ORDER BY count DESC, project_name ASC
             """,

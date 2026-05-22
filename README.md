@@ -28,7 +28,9 @@ uv run niuma todo focus-log 1 --from "09:30" --to "11:30"
 uv run niuma todo focus-log 1 --duration "2h"
 
 uv run niuma progress log "完成支付接口联调" --content "覆盖下单、回调和异常重试链路" -p 1 -t Feature
+uv run niuma progress new "补录支付接口联调" --data "2026-05-21 23:30" --content "覆盖下单、回调和异常重试链路" -p 1 -t Feature
 uv run niuma progress modify 1 --title "完成支付接口回归" --content "已补齐回调失败场景" -p 1 -t Feature
+uv run niuma progress modify 1 --data "2026-05-22 10:30"
 uv run niuma progress list
 uv run niuma progress list --title-only
 uv run niuma progress list --content-limit 50

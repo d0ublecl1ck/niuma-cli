@@ -65,6 +65,7 @@ def log_focus(
         todo_id=todo["id"],
         source="focus",
         created_at=ended_at,
+        happened_at=ended_at,
         started_at=started_at,
         ended_at=ended_at,
     )
@@ -86,6 +87,7 @@ def stop_focus(conn: Connection) -> FinishedSession:
         todo_id=session["todo_id"],
         source="focus",
         created_at=ended_at,
+        happened_at=ended_at,
         started_at=session["started_at"],
         ended_at=ended_at,
     )
@@ -122,6 +124,7 @@ def end_chill(conn: Connection) -> FinishedSession:
         tag=session["tag"],
         source="chill",
         created_at=ended_at,
+        happened_at=ended_at,
         started_at=session["started_at"],
         ended_at=ended_at,
     )

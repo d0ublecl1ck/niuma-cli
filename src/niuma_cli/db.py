@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS progress (
     source TEXT NOT NULL,
     started_at TEXT,
     ended_at TEXT,
-    created_at TEXT NOT NULL
+    happened_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS dailies (
@@ -65,6 +67,7 @@ INDEX_SCHEMA = """
 CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at);
 CREATE INDEX IF NOT EXISTS idx_todos_completed_at ON todos(completed_at);
 CREATE INDEX IF NOT EXISTS idx_progress_created_at ON progress(created_at);
+CREATE INDEX IF NOT EXISTS idx_progress_happened_at ON progress(happened_at);
 CREATE INDEX IF NOT EXISTS idx_dailies_date ON dailies(date);
 """
 
@@ -95,6 +98,7 @@ class Database:
         with self.connect() as conn:
             conn.executescript(TABLE_SCHEMA)
             _migrate_title_content_schema(conn)
+            _migrate_progress_business_time_schema(conn)
             conn.executescript(INDEX_SCHEMA)
 
     @contextmanager
@@ -177,18 +181,36 @@ def _rebuild_legacy_progress(conn: sqlite3.Connection) -> None:
             source TEXT NOT NULL,
             started_at TEXT,
             ended_at TEXT,
-            created_at TEXT NOT NULL
+            happened_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )
         """
     )
     conn.execute(
         """
-        INSERT INTO progress (id, project_id, todo_id, title, content, tag, source, started_at, ended_at, created_at)
-        SELECT id, project_id, todo_id, content, NULL, tag, source, started_at, ended_at, created_at
+        INSERT INTO progress (
+            id, project_id, todo_id, title, content, tag, source, started_at, ended_at, happened_at, created_at, updated_at
+        )
+        SELECT id, project_id, todo_id, content, NULL, tag, source, started_at, ended_at, created_at, created_at, created_at
         FROM progress_legacy
         """
     )
     conn.execute("DROP TABLE progress_legacy")
+
+
+def _migrate_progress_business_time_schema(conn: sqlite3.Connection) -> None:
+    """补齐 Progress 的业务时间和更新时间字段，保留创建时间作为审计时间。"""
+
+    columns = _table_columns(conn, "progress")
+    if not columns:
+        return
+    if "happened_at" not in columns:
+        conn.execute("ALTER TABLE progress ADD COLUMN happened_at TEXT")
+        conn.execute("UPDATE progress SET happened_at = created_at WHERE happened_at IS NULL")
+    if "updated_at" not in columns:
+        conn.execute("ALTER TABLE progress ADD COLUMN updated_at TEXT")
+        conn.execute("UPDATE progress SET updated_at = created_at WHERE updated_at IS NULL")
 
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:

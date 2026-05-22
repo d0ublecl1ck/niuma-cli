@@ -12,6 +12,7 @@ from niuma_cli.app import create_app_context
 from niuma_cli.interactive import choose_project_id, choose_tag
 from niuma_cli.output import render_table
 from niuma_cli.services import activity, dailies, progress, projects, search, stats, tags, todos
+from niuma_cli.time_utils import parse_business_datetime
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,12 +69,26 @@ def build_parser() -> argparse.ArgumentParser:
     progress_log = progress_subparsers.add_parser("log", help="记录工作进展")
     progress_log.add_argument("title")
     progress_log.add_argument("--content")
+    progress_log.add_argument("--data", dest="happened_at", help="业务时间，用于预录或补录，支持 YYYY-MM-DD、YYYY-MM-DD HH:MM 或 HH:MM")
+    progress_log.add_argument("--date", dest="happened_at", help="业务时间别名")
+    progress_log.add_argument("--at", dest="happened_at", help="业务时间别名")
     progress_log.add_argument("-p", "--project-id", type=int)
     progress_log.add_argument("-t", "--tag")
+    progress_new = progress_subparsers.add_parser("new", help="预录或补录工作进展")
+    progress_new.add_argument("title")
+    progress_new.add_argument("--content")
+    progress_new.add_argument("--data", dest="happened_at", help="业务时间，用于预录或补录，支持 YYYY-MM-DD、YYYY-MM-DD HH:MM 或 HH:MM")
+    progress_new.add_argument("--date", dest="happened_at", help="业务时间别名")
+    progress_new.add_argument("--at", dest="happened_at", help="业务时间别名")
+    progress_new.add_argument("-p", "--project-id", type=int)
+    progress_new.add_argument("-t", "--tag")
     progress_modify = progress_subparsers.add_parser("modify", help="修改工作进展")
     progress_modify.add_argument("id", type=int)
     progress_modify.add_argument("--title")
     progress_modify.add_argument("--content")
+    progress_modify.add_argument("--data", dest="happened_at", help="业务时间，用于调整预录或补录时间")
+    progress_modify.add_argument("--date", dest="happened_at", help="业务时间别名")
+    progress_modify.add_argument("--at", dest="happened_at", help="业务时间别名")
     progress_modify.add_argument("-p", "--project-id", type=int)
     progress_modify.add_argument("-t", "--tag")
     progress_list = progress_subparsers.add_parser("list", help="列出工作进展")
@@ -252,14 +267,16 @@ def _handle_progress(args: argparse.Namespace, context) -> int:
     """处理 Progress 命令。"""
 
     with context.database.connect() as conn:
-        if args.progress_command == "log":
+        if args.progress_command in {"log", "new"}:
             tag = tags.validate_tag(context.config_store, choose_tag(tags.list_tags(context.config_store), args.tag))
             project_id = choose_project_id(projects.list_projects(conn), args.project_id)
-            progress_id = progress.create_progress(conn, args.title, tag, project_id, content=args.content)
+            happened_at = _parse_optional_business_time(args.happened_at)
+            progress_id = progress.create_progress(conn, args.title, tag, project_id, content=args.content, happened_at=happened_at)
             print(f"Progress 已记录: #{progress_id}")
             return 0
         if args.progress_command == "modify":
             tag = _validate_optional_tag(context, args.tag)
+            happened_at = _parse_optional_business_time(args.happened_at)
             progress.modify_progress(
                 conn,
                 args.id,
@@ -268,6 +285,7 @@ def _handle_progress(args: argparse.Namespace, context) -> int:
                 tag=tag,
                 project_id=args.project_id,
                 change_project=args.project_id is not None,
+                happened_at=happened_at,
             )
             print(f"Progress 已更新: #{args.id}")
             return 0
@@ -304,6 +322,14 @@ def _validate_optional_tag(context, tag: str | None) -> str | None:
     if tag is None:
         return None
     return tags.validate_tag(context.config_store, tag)
+
+
+def _parse_optional_business_time(value: str | None) -> str | None:
+    """只在用户传入业务时间时解析，未传入时使用当前创建时间。"""
+
+    if value is None:
+        return None
+    return parse_business_datetime(value)
 
 
 def _handle_chill(args: argparse.Namespace, context) -> int:
@@ -447,7 +473,7 @@ def _render_progress_rows(rows: list[Row], title_only: bool = False, content_lim
         return _render_rows(
             ["ID", "时间", "项目", "标签", "来源", "标题"],
             (
-                (row["id"], row["created_at"], row["project_name"] or "-", row["tag"], row["source"], row["title"])
+                (row["id"], row["happened_at"], row["project_name"] or "-", row["tag"], row["source"], row["title"])
                 for row in rows
             ),
         )
@@ -456,7 +482,7 @@ def _render_progress_rows(rows: list[Row], title_only: bool = False, content_lim
         (
             (
                 row["id"],
-                row["created_at"],
+                row["happened_at"],
                 row["project_name"] or "-",
                 row["tag"],
                 row["source"],
@@ -494,7 +520,9 @@ def _progress_detail_rows(row: Row) -> list[tuple[str, object]]:
         ("来源", row["source"]),
         ("开始时间", row["started_at"] or "-"),
         ("结束时间", row["ended_at"] or "-"),
+        ("业务时间", row["happened_at"]),
         ("创建时间", row["created_at"]),
+        ("更新时间", row["updated_at"]),
         ("标题", row["title"]),
         ("内容", row["content"] or "-"),
     ]
@@ -510,7 +538,7 @@ def _render_search_results(results: list[search.SearchResult], content_limit: in
     """渲染跨实体搜索结果。"""
 
     return _render_rows(
-        ["实体", "ID", "命中字段", "标题", "内容", "创建时间"],
+        ["实体", "ID", "命中字段", "标题", "内容", "时间"],
         (
             (
                 result.entity,
@@ -518,7 +546,7 @@ def _render_search_results(results: list[search.SearchResult], content_limit: in
                 result.matched_field,
                 result.title,
                 _truncate_content(result.content, content_limit),
-                result.created_at or "-",
+                result.recorded_at or "-",
             )
             for result in results
         ),

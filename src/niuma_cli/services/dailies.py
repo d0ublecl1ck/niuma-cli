@@ -158,11 +158,11 @@ def _list_daily_progress(conn: Connection, day: str) -> list[Row]:
     return list(
         conn.execute(
             """
-            SELECT p.id, p.title, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
+            SELECT p.id, p.title, p.content, p.tag, p.source, p.happened_at, pr.name AS project_name
             FROM progress p
             LEFT JOIN projects pr ON pr.id = p.project_id
-            WHERE date(p.created_at) = ? AND p.source != 'todo_done'
-            ORDER BY p.created_at ASC, p.id ASC
+            WHERE date(p.happened_at) = ? AND p.source != 'todo_done'
+            ORDER BY p.happened_at ASC, p.id ASC
             """,
             (day,),
         )
@@ -192,11 +192,11 @@ def _list_range_progress(conn: Connection, start_date: str, end_date: str) -> li
     return list(
         conn.execute(
             """
-            SELECT p.id, p.title, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
+            SELECT p.id, p.title, p.content, p.tag, p.source, p.happened_at, pr.name AS project_name
             FROM progress p
             LEFT JOIN projects pr ON pr.id = p.project_id
-            WHERE date(p.created_at) BETWEEN ? AND ? AND p.source != 'todo_done'
-            ORDER BY p.created_at ASC, p.id ASC
+            WHERE date(p.happened_at) BETWEEN ? AND ? AND p.source != 'todo_done'
+            ORDER BY p.happened_at ASC, p.id ASC
             """,
             (start_date, end_date),
         )

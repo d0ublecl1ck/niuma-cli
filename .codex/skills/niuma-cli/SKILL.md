@@ -29,10 +29,11 @@ Use this skill to work on the `niuma-cli` repository without rediscovering its c
 
 - `project create|rename|list` manages projects.
 - `todo add|modify|done|list|show|focus|focus-log|stop` manages todos and focus records.
-- `progress log|modify|list|show` manages progress records.
+- `progress log|new|modify|list|show` manages progress records.
 - `search <query>` performs fuzzy search across projects, todos, progress records, dailies, and tags; use `--entity <entity>` to narrow scope.
-- `todo add <title>` and `progress log <title>` require a concise title and accept optional `--content` details.
-- `todo modify` and `progress modify` update title, content, tag, and project association when `--title`, `--content`, `--tag`, or `--project-id` is provided.
+- `todo add <title>`, `progress log <title>`, and `progress new <title>` require a concise title and accept optional `--content` details.
+- `progress log` and `progress new` accept `--data`, `--date`, or `--at` business time for backfill or prefill records; progress lists, reports, and stats use business time instead of creation audit time.
+- `todo modify` and `progress modify` update title, content, tag, project association, and Progress business time when `--title`, `--content`, `--tag`, `--project-id`, or `--data` is provided.
 - `todo list` and `progress list` show content summaries capped at 20 characters by default; use `--content-limit <n>` to adjust or `--title-only` to hide content.
 - Use `todo show <id>` or `progress show <id>` when full content is needed.
 - Split Todo and Progress records atomically by independently understandable work outcome; avoid bundling multiple unrelated changes, fixes, docs, and verification items into one broad record.
@@ -65,7 +66,9 @@ NIUMA_HOME="$(mktemp -d)" uv run niuma todo modify 1 --title "修复登录页验
 NIUMA_HOME="$(mktemp -d)" uv run niuma todo list --title-only
 NIUMA_HOME="$(mktemp -d)" uv run niuma todo show 1
 NIUMA_HOME="$(mktemp -d)" uv run niuma progress log "完成支付接口联调" --content "覆盖下单、回调和异常重试链路" -p 1 -t Feature
+NIUMA_HOME="$(mktemp -d)" uv run niuma progress new "补录支付接口联调" --data "2026-05-21 23:30" --content "覆盖下单、回调和异常重试链路" -p 1 -t Feature
 NIUMA_HOME="$(mktemp -d)" uv run niuma progress modify 1 --title "完成支付接口回归" --content "已补齐回调失败场景" -p 1 -t Feature
+NIUMA_HOME="$(mktemp -d)" uv run niuma progress modify 1 --data "2026-05-22 10:30"
 NIUMA_HOME="$(mktemp -d)" uv run niuma progress list --content-limit 50
 NIUMA_HOME="$(mktemp -d)" uv run niuma progress show 1
 NIUMA_HOME="$(mktemp -d)" uv run niuma search "支付" --entity progress
