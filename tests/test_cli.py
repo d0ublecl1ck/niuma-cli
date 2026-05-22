@@ -107,6 +107,123 @@ def test_progress_modify_updates_title_content_tag_and_project(tmp_path: Path, m
     assert "旧详情" not in output.split("Progress 已更新: #1", maxsplit=1)[-1]
 
 
+def test_todo_list_truncates_content_and_can_show_title_only(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 Todo 列表默认截断详情，并支持仅展示标题。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    long_content = "一二三四五六七八九十一二三四五六七八九十完整详情"
+    assert main(["todo", "add", "长内容 Todo", "--content", long_content, "-t", "Feature"]) == 0
+    assert main(["todo", "list"]) == 0
+
+    output = capsys.readouterr().out
+    assert "一二三四五六七八九十一二三四五六七八九十..." in output
+    assert long_content not in output.split("Todo 已创建: #1", maxsplit=1)[-1]
+
+    assert main(["todo", "list", "--title-only"]) == 0
+    title_only_output = capsys.readouterr().out
+    assert "长内容 Todo" in title_only_output
+    assert "完整详情" not in title_only_output
+    assert long_content not in title_only_output
+
+
+def test_progress_list_content_limit_and_show_full_content(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 Progress 列表可限制详情字数，show 可查看完整详情。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    content = "这是超过五个字的完整进展详情"
+    assert main(["progress", "log", "长内容进展", "--content", content, "-t", "Feature"]) == 0
+    assert main(["progress", "list", "--content-limit", "5"]) == 0
+
+    output = capsys.readouterr().out
+    assert "这是超过五..." in output
+    assert content not in output.split("Progress 已记录: #1", maxsplit=1)[-1]
+
+    assert main(["progress", "show", "1"]) == 0
+    show_output = capsys.readouterr().out
+    assert "长内容进展" in show_output
+    assert content in show_output
+
+
+def test_todo_show_returns_full_content(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 Todo show 可查看完整标题和详情。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    content = "Todo 的完整内容不会在详情命令里被截断"
+    assert main(["todo", "add", "查看详情 Todo", "--content", content, "-t", "Feature"]) == 0
+    assert main(["todo", "show", "1"]) == 0
+
+    output = capsys.readouterr().out
+    assert "查看详情 Todo" in output
+    assert content in output
+
+
+def test_search_finds_all_supported_entities(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 search 默认能跨 Project、Todo、Progress、Daily 和 Tag 搜索。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["config", "tags", "add", "SearchTag"]) == 0
+    assert main(["project", "create", "搜索项目"]) == 0
+    assert main(["todo", "add", "搜索 Todo", "--content", "待办详情", "-p", "1", "-t", "SearchTag"]) == 0
+    assert main(["progress", "log", "搜索 Progress", "--content", "进展详情", "-p", "1", "-t", "SearchTag"]) == 0
+    assert main(["daily", "generate"]) == 0
+    assert main(["search", "搜索"]) == 0
+
+    output = capsys.readouterr().out
+    assert "project" in output
+    assert "todo" in output
+    assert "progress" in output
+    assert "daily" in output
+    assert "搜索项目" in output
+    assert "搜索 Todo" in output
+    assert "搜索 Progress" in output
+
+    assert main(["search", "SearchTag"]) == 0
+    tag_output = capsys.readouterr().out
+    assert "tag" in tag_output
+    assert "SearchTag" in tag_output
+
+
+def test_search_can_filter_entity_and_truncate_content(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 search 支持实体限定和内容摘要长度控制。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["todo", "add", "搜索目标", "--content", "这是一段很长的搜索详情", "-t", "Feature"]) == 0
+    assert main(["progress", "log", "搜索目标进展", "--content", "不应该出现在 Todo 限定结果", "-t", "Feature"]) == 0
+    assert main(["search", "搜索", "--entity", "todo", "--content-limit", "4"]) == 0
+
+    output = capsys.readouterr().out
+    assert "todo" in output
+    assert "搜索目标" in output
+    assert "这是一段..." in output
+    assert "progress" not in output
+    assert "不应该出现在 Todo 限定结果" not in output
+
+
+def test_search_is_case_insensitive_for_english_content(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证英文搜索大小写不敏感。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["progress", "log", "Fix Login Flow", "--content", "Cover Retry Path", "-t", "Feature"]) == 0
+    assert main(["search", "login", "--entity", "progress"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Fix Login Flow" in output
+
+
+def test_search_rejects_empty_query(tmp_path: Path, monkeypatch) -> None:
+    """验证 search 拒绝空白关键词。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["search", "   "]) == 1
+
+
 def test_modify_requires_at_least_one_field(tmp_path: Path, monkeypatch) -> None:
     """验证 modify 必须提供至少一个可更新字段，避免无意义写入。"""
 

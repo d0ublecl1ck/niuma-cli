@@ -110,6 +110,23 @@ def list_todos(conn: Connection, date_text: str | None = None) -> dict[str, list
     return {"pending": pending, "created": created, "completed": completed}
 
 
+def get_todo(conn: Connection, todo_id: int) -> Row:
+    """读取单条 Todo 完整内容，供详情命令展示。"""
+
+    row = conn.execute(
+        """
+        SELECT t.id, t.title, t.content, t.tag, t.status, t.created_at, t.completed_at, p.name AS project_name
+        FROM todos t
+        LEFT JOIN projects p ON p.id = t.project_id
+        WHERE t.id = ?
+        """,
+        (todo_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"Todo 不存在: {todo_id}")
+    return row
+
+
 def count_today(conn: Connection) -> tuple[int, int]:
     """统计今日完成和当前未完成任务数。"""
 

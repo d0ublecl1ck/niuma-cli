@@ -11,7 +11,7 @@ from niuma_cli import __version__
 from niuma_cli.app import create_app_context
 from niuma_cli.interactive import choose_project_id, choose_tag
 from niuma_cli.output import render_table
-from niuma_cli.services import activity, dailies, progress, projects, stats, tags, todos
+from niuma_cli.services import activity, dailies, progress, projects, search, stats, tags, todos
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
     todo_modify.add_argument("-t", "--tag")
     todo_list = todo_subparsers.add_parser("list", help="列出 Todo")
     todo_list.add_argument("date", nargs="?")
+    todo_list.add_argument("--title-only", action="store_true", help="列表仅展示标题，不展示内容详情")
+    todo_list.add_argument("--content-limit", type=_non_negative_int, default=20, help="列表内容详情最大显示字数，默认 20")
+    todo_show = todo_subparsers.add_parser("show", help="查看 Todo 完整内容")
+    todo_show.add_argument("id", type=int)
     todo_focus = todo_subparsers.add_parser("focus", help="开始专注处理 Todo")
     todo_focus.add_argument("id", type=int)
     todo_focus_log = todo_subparsers.add_parser("focus-log", help="补录 Todo 专注时间")
@@ -74,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
     progress_modify.add_argument("-t", "--tag")
     progress_list = progress_subparsers.add_parser("list", help="列出工作进展")
     progress_list.add_argument("date", nargs="?")
+    progress_list.add_argument("--title-only", action="store_true", help="列表仅展示标题，不展示内容详情")
+    progress_list.add_argument("--content-limit", type=_non_negative_int, default=20, help="列表内容详情最大显示字数，默认 20")
+    progress_show = progress_subparsers.add_parser("show", help="查看 Progress 完整内容")
+    progress_show.add_argument("id", type=int)
 
     daily_parser = subparsers.add_parser("daily", help="日报生成")
     daily_subparsers = daily_parser.add_subparsers(dest="daily_command")
@@ -89,6 +97,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     stats_parser = subparsers.add_parser("stats", help="统计与复盘")
     stats_parser.add_argument("period", choices=["week", "month"])
+
+    search_parser = subparsers.add_parser("search", help="跨实体模糊搜索")
+    search_parser.add_argument("query")
+    search_parser.add_argument(
+        "-e",
+        "--entity",
+        choices=["all", *search.SEARCH_ENTITIES],
+        default="all",
+        help="限定搜索实体，默认 all",
+    )
+    search_parser.add_argument("--content-limit", type=_non_negative_int, default=20, help="搜索结果内容摘要最大显示字数，默认 20")
 
     config_parser = subparsers.add_parser("config", help="配置管理")
     config_subparsers = config_parser.add_subparsers(dest="config_command")
@@ -145,6 +164,8 @@ def _dispatch(args: argparse.Namespace, context) -> int:
         return _handle_chill(args, context)
     if args.command == "stats":
         return _handle_stats(args, context)
+    if args.command == "search":
+        return _handle_search(args, context)
     if args.command == "config":
         return _handle_config(args, context)
     if args.command == "status":
@@ -206,7 +227,11 @@ def _handle_todo(args: argparse.Namespace, context) -> int:
             return 0
         if args.todo_command == "list":
             grouped = todos.list_todos(conn, args.date)
-            print(_render_todo_sections(grouped))
+            print(_render_todo_sections(grouped, title_only=args.title_only, content_limit=args.content_limit))
+            return 0
+        if args.todo_command == "show":
+            row = todos.get_todo(conn, args.id)
+            print(_render_detail_rows(_todo_detail_rows(row)))
             return 0
         if args.todo_command == "focus":
             activity.start_focus(conn, args.id)
@@ -248,23 +273,11 @@ def _handle_progress(args: argparse.Namespace, context) -> int:
             return 0
         if args.progress_command == "list":
             rows = progress.list_progress(conn, args.date)
-            print(
-                _render_rows(
-                    ["ID", "时间", "项目", "标签", "来源", "标题", "内容"],
-                    (
-                        (
-                            row["id"],
-                            row["created_at"],
-                            row["project_name"] or "-",
-                            row["tag"],
-                            row["source"],
-                            row["title"],
-                            row["content"],
-                        )
-                        for row in rows
-                    ),
-                )
-            )
+            print(_render_progress_rows(rows, title_only=args.title_only, content_limit=args.content_limit))
+            return 0
+        if args.progress_command == "show":
+            row = progress.get_progress(conn, args.id)
+            print(_render_detail_rows(_progress_detail_rows(row)))
             return 0
     raise ValueError("请指定 progress 子命令")
 
@@ -314,6 +327,15 @@ def _handle_stats(args: argparse.Namespace, context) -> int:
     with context.database.connect() as conn:
         report = stats.build_stats(conn, args.period)
     print(_render_stats_report(report))
+    return 0
+
+
+def _handle_search(args: argparse.Namespace, context) -> int:
+    """处理跨实体模糊搜索命令。"""
+
+    with context.database.connect() as conn:
+        results = search.search_all(conn, context.config_store, args.query, args.entity)
+    print(_render_search_results(results, args.content_limit))
     return 0
 
 
@@ -380,7 +402,7 @@ def _handle_status(context) -> int:
     return 0
 
 
-def _render_todo_sections(grouped: dict[str, list[Row]]) -> str:
+def _render_todo_sections(grouped: dict[str, list[Row]], title_only: bool = False, content_limit: int = 20) -> str:
     """渲染 Todo 三个核心分区。"""
 
     names = {
@@ -391,16 +413,138 @@ def _render_todo_sections(grouped: dict[str, list[Row]]) -> str:
     sections: list[str] = []
     for key, rows in grouped.items():
         sections.append(names[key])
-        sections.append(
-            _render_rows(
-                ["ID", "项目", "标签", "状态", "标题", "内容"],
-                (
-                    (row["id"], row["project_name"] or "-", row["tag"], row["status"], row["title"], row["content"] or "-")
-                    for row in rows
-                ),
+        if title_only:
+            sections.append(
+                _render_rows(
+                    ["ID", "项目", "标签", "状态", "标题"],
+                    ((row["id"], row["project_name"] or "-", row["tag"], row["status"], row["title"]) for row in rows),
+                )
             )
-        )
+        else:
+            sections.append(
+                _render_rows(
+                    ["ID", "项目", "标签", "状态", "标题", "内容"],
+                    (
+                        (
+                            row["id"],
+                            row["project_name"] or "-",
+                            row["tag"],
+                            row["status"],
+                            row["title"],
+                            _truncate_content(row["content"], content_limit),
+                        )
+                        for row in rows
+                    ),
+                )
+            )
     return "\n\n".join(sections)
+
+
+def _render_progress_rows(rows: list[Row], title_only: bool = False, content_limit: int = 20) -> str:
+    """渲染 Progress 列表，默认只展示内容摘要。"""
+
+    if title_only:
+        return _render_rows(
+            ["ID", "时间", "项目", "标签", "来源", "标题"],
+            (
+                (row["id"], row["created_at"], row["project_name"] or "-", row["tag"], row["source"], row["title"])
+                for row in rows
+            ),
+        )
+    return _render_rows(
+        ["ID", "时间", "项目", "标签", "来源", "标题", "内容"],
+        (
+            (
+                row["id"],
+                row["created_at"],
+                row["project_name"] or "-",
+                row["tag"],
+                row["source"],
+                row["title"],
+                _truncate_content(row["content"], content_limit),
+            )
+            for row in rows
+        ),
+    )
+
+
+def _todo_detail_rows(row: Row) -> list[tuple[str, object]]:
+    """把 Todo 完整记录转换为详情展示行。"""
+
+    return [
+        ("ID", row["id"]),
+        ("项目", row["project_name"] or "-"),
+        ("标签", row["tag"]),
+        ("状态", row["status"]),
+        ("创建时间", row["created_at"]),
+        ("完成时间", row["completed_at"] or "-"),
+        ("标题", row["title"]),
+        ("内容", row["content"] or "-"),
+    ]
+
+
+def _progress_detail_rows(row: Row) -> list[tuple[str, object]]:
+    """把 Progress 完整记录转换为详情展示行。"""
+
+    return [
+        ("ID", row["id"]),
+        ("项目", row["project_name"] or "-"),
+        ("关联 Todo", row["todo_id"] or "-"),
+        ("标签", row["tag"]),
+        ("来源", row["source"]),
+        ("开始时间", row["started_at"] or "-"),
+        ("结束时间", row["ended_at"] or "-"),
+        ("创建时间", row["created_at"]),
+        ("标题", row["title"]),
+        ("内容", row["content"] or "-"),
+    ]
+
+
+def _render_detail_rows(rows: list[tuple[str, object]]) -> str:
+    """渲染详情表，保留完整内容，不做摘要截断。"""
+
+    return render_table(["字段", "值"], rows)
+
+
+def _render_search_results(results: list[search.SearchResult], content_limit: int = 20) -> str:
+    """渲染跨实体搜索结果。"""
+
+    return _render_rows(
+        ["实体", "ID", "命中字段", "标题", "内容", "创建时间"],
+        (
+            (
+                result.entity,
+                result.entity_id,
+                result.matched_field,
+                result.title,
+                _truncate_content(result.content, content_limit),
+                result.created_at or "-",
+            )
+            for result in results
+        ),
+    )
+
+
+def _truncate_content(content: str | None, limit: int) -> str:
+    """按字数限制生成列表摘要，完整内容由 show 命令查看。"""
+
+    if not content:
+        return "-"
+    if len(content) <= limit:
+        return content
+    return f"{content[:limit]}..."
+
+
+def _non_negative_int(raw_value: str) -> int:
+    """解析非负整数参数，用于控制内容摘要长度。"""
+
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("必须是非负整数") from exc
+    if value < 0:
+        raise argparse.ArgumentTypeError("必须是非负整数")
+    return value
 
 
 def _render_rows(headers: list[str], rows) -> str:
