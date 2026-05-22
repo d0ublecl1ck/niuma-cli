@@ -16,11 +16,12 @@ def create_progress(
     todo_id: int | None = None,
     source: str = "manual",
     created_at: str | None = None,
+    happened_at: str | None = None,
     started_at: str | None = None,
     ended_at: str | None = None,
     content: str | None = None,
 ) -> int:
-    """创建一条工作进度记录，标题必填，内容详情可选。"""
+    """创建一条工作进度记录，标题必填，业务时间可用于预录或补录。"""
 
     normalized_title = title.strip()
     normalized_content = _normalize_optional_content(content)
@@ -28,12 +29,27 @@ def create_progress(
         raise ValueError("Progress 标题不能为空")
     require_project(conn, project_id)
     timestamp = created_at or now_text()
+    business_time = happened_at or timestamp
     cursor = conn.execute(
         """
-        INSERT INTO progress (project_id, todo_id, title, content, tag, source, started_at, ended_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO progress (
+            project_id, todo_id, title, content, tag, source, started_at, ended_at, happened_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (project_id, todo_id, normalized_title, normalized_content, tag, source, started_at, ended_at, timestamp),
+        (
+            project_id,
+            todo_id,
+            normalized_title,
+            normalized_content,
+            tag,
+            source,
+            started_at,
+            ended_at,
+            business_time,
+            timestamp,
+            timestamp,
+        ),
     )
     return int(cursor.lastrowid)
 
@@ -45,11 +61,11 @@ def list_progress(conn: Connection, date_text: str | None = None) -> list[Row]:
     return list(
         conn.execute(
             """
-            SELECT p.id, p.title, p.content, p.tag, p.source, p.created_at, pr.name AS project_name
+            SELECT p.id, p.title, p.content, p.tag, p.source, p.happened_at, p.created_at, pr.name AS project_name
             FROM progress p
             LEFT JOIN projects pr ON pr.id = p.project_id
-            WHERE date(p.created_at) = ?
-            ORDER BY p.created_at ASC, p.id ASC
+            WHERE date(p.happened_at) = ?
+            ORDER BY p.happened_at ASC, p.id ASC
             """,
             (day,),
         )
@@ -61,7 +77,8 @@ def get_progress(conn: Connection, progress_id: int) -> Row:
 
     row = conn.execute(
         """
-        SELECT p.id, p.todo_id, p.title, p.content, p.tag, p.source, p.started_at, p.ended_at, p.created_at,
+        SELECT p.id, p.todo_id, p.title, p.content, p.tag, p.source, p.started_at, p.ended_at, p.happened_at,
+               p.created_at, p.updated_at,
                pr.name AS project_name
         FROM progress p
         LEFT JOIN projects pr ON pr.id = p.project_id
@@ -82,13 +99,14 @@ def modify_progress(
     tag: str | None = None,
     project_id: int | None = None,
     change_project: bool = False,
+    happened_at: str | None = None,
 ) -> None:
-    """按需更新 Progress 标题、内容详情、标签和项目关联。"""
+    """按需更新 Progress 标题、内容详情、业务时间、标签和项目关联。"""
 
     progress = conn.execute("SELECT id FROM progress WHERE id = ?", (progress_id,)).fetchone()
     if progress is None:
         raise ValueError(f"Progress 不存在: {progress_id}")
-    if title is None and content is None and tag is None and not change_project:
+    if title is None and content is None and tag is None and happened_at is None and not change_project:
         raise ValueError("请至少提供一个要更新的 Progress 字段")
 
     updates: list[str] = []
@@ -106,10 +124,15 @@ def modify_progress(
     if tag is not None:
         updates.append("tag = ?")
         params.append(tag)
+    if happened_at is not None:
+        updates.append("happened_at = ?")
+        params.append(happened_at)
     if change_project:
         require_project(conn, project_id)
         updates.append("project_id = ?")
         params.append(project_id)
+    updates.append("updated_at = ?")
+    params.append(now_text())
 
     params.append(progress_id)
     conn.execute(f"UPDATE progress SET {', '.join(updates)} WHERE id = ?", params)

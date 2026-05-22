@@ -83,6 +83,20 @@ def parse_local_datetime(value: str) -> datetime:
     raise ValueError("时间格式必须是 HH:MM 或 YYYY-MM-DD HH:MM")
 
 
+def parse_business_datetime(value: str) -> str:
+    """解析 Progress 业务时间，支持预录、补录和当天时间简写。"""
+
+    text = value.strip()
+    if not text:
+        raise ValueError("业务时间不能为空")
+    try:
+        return datetime.strptime(text, DATE_FORMAT).strftime(f"{DATE_FORMAT} 00:00")
+    except ValueError:
+        parsed = parse_local_datetime(text)
+        # 业务时间用于列表、日报和统计归档，统一到分钟精度避免同一字段出现两种格式。
+        return datetime_text(parsed)
+
+
 def parse_duration_minutes(value: str) -> int:
     """解析补录时长，支持 120、120m、2h、2小时、两小时、90分钟。"""
 
@@ -148,4 +162,4 @@ def _parse_chinese_number(value: str) -> float:
 def datetime_text(value: datetime) -> str:
     """将 datetime 转成 SQLite 统一保存的本地时间字符串。"""
 
-    return value.replace(second=0, microsecond=0).isoformat(sep=" ")
+    return value.replace(second=0, microsecond=0).strftime(DATETIME_FORMAT)

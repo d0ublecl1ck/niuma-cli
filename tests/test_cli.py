@@ -107,6 +107,49 @@ def test_progress_modify_updates_title_content_tag_and_project(tmp_path: Path, m
     assert "旧详情" not in output.split("Progress 已更新: #1", maxsplit=1)[-1]
 
 
+def test_progress_new_supports_business_time_for_backfill_and_prefill(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 Progress new 可以用 data 参数记录业务时间，支持补录和预录。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["progress", "new", "补录昨天进展", "--data", "2026-05-21 23:30", "-t", "Feature"]) == 0
+    assert main(["progress", "new", "预录明天计划", "--data", "2026-05-23", "-t", "Feature"]) == 0
+    assert main(["progress", "list", "2026-05-21"]) == 0
+    assert main(["progress", "list", "2026-05-23"]) == 0
+
+    output = capsys.readouterr().out
+    assert "补录昨天进展" in output
+    assert "2026-05-21 23:30" in output
+    assert "预录明天计划" in output
+    assert "2026-05-23 00:00" in output
+
+    db_path = tmp_path / "niuma.db"
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT happened_at, created_at, updated_at FROM progress ORDER BY id").fetchall()
+    assert rows[0][0] == "2026-05-21 23:30"
+    assert rows[1][0] == "2026-05-23 00:00"
+    assert rows[0][1] == rows[0][2]
+    assert rows[1][1] == rows[1][2]
+
+
+def test_progress_modify_can_update_business_time(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 Progress modify 可以调整业务时间并刷新更新时间。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["progress", "log", "需要调整业务时间", "--data", "2026-05-21 09:00", "-t", "Feature"]) == 0
+    assert main(["progress", "modify", "1", "--data", "2026-05-22 10:30"]) == 0
+    assert main(["progress", "list", "2026-05-21"]) == 0
+    assert main(["progress", "list", "2026-05-22"]) == 0
+    assert main(["progress", "show", "1"]) == 0
+
+    output = capsys.readouterr().out
+    assert "2026-05-21 09:00" not in output.split("Progress 已更新: #1", maxsplit=1)[-1]
+    assert "2026-05-22 10:30" in output
+    assert "业务时间" in output
+    assert "更新时间" in output
+
+
 def test_todo_list_truncates_content_and_can_show_title_only(tmp_path: Path, monkeypatch, capsys) -> None:
     """验证 Todo 列表默认截断详情，并支持仅展示标题。"""
 
@@ -204,6 +247,21 @@ def test_search_can_filter_entity_and_truncate_content(tmp_path: Path, monkeypat
     assert "不应该出现在 Todo 限定结果" not in output
 
 
+def test_progress_search_labels_business_time_neutrally(tmp_path: Path, monkeypatch, capsys) -> None:
+    """验证 Progress 搜索展示业务时间时不误标为创建时间。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["progress", "new", "补录搜索进展", "--data", "2026-05-21 23:30", "-t", "Feature"]) == 0
+    assert main(["search", "补录搜索进展", "--entity", "progress"]) == 0
+
+    output = capsys.readouterr().out
+    assert "补录搜索进展" in output
+    assert "2026-05-21 23:30" in output
+    assert "创建时间" not in output
+    assert "时间" in output
+
+
 def test_search_is_case_insensitive_for_english_content(tmp_path: Path, monkeypatch, capsys) -> None:
     """验证英文搜索大小写不敏感。"""
 
@@ -288,9 +346,9 @@ def test_existing_todo_and_progress_content_migrates_to_title(tmp_path: Path, mo
     assert "旧 Progress 内容" in output
     with sqlite3.connect(db_path) as conn:
         todo_row = conn.execute("SELECT title, content FROM todos WHERE id = 1").fetchone()
-        progress_row = conn.execute("SELECT title, content FROM progress WHERE id = 1").fetchone()
+        progress_row = conn.execute("SELECT title, content, happened_at, updated_at FROM progress WHERE id = 1").fetchone()
     assert todo_row == ("旧 Todo 内容", None)
-    assert progress_row == ("旧 Progress 内容", None)
+    assert progress_row == ("旧 Progress 内容", None, "2026-05-22 09:10:00", "2026-05-22 09:10:00")
 
 
 def test_config_reset_recovers_from_bad_database_path(tmp_path: Path, monkeypatch) -> None:
@@ -379,6 +437,22 @@ def test_daily_generate_persists_report_and_raw_context(tmp_path: Path, monkeypa
     raw_context = json.loads(row[2])
     assert raw_context["progress"]
     assert raw_context["completed_todos"]
+
+
+def test_daily_raw_context_uses_happened_at_for_progress_business_time(tmp_path: Path, monkeypatch) -> None:
+    """验证日报原始快照保留 Progress 业务时间字段语义。"""
+
+    monkeypatch.setenv("NIUMA_HOME", str(tmp_path))
+
+    assert main(["progress", "new", "补录日报进展", "--data", "2026-05-22 23:30", "-t", "Feature"]) == 0
+    assert main(["daily", "generate", "2026-05-22"]) == 0
+
+    with sqlite3.connect(tmp_path / "niuma.db") as conn:
+        row = conn.execute("SELECT raw_context FROM dailies").fetchone()
+
+    raw_context = json.loads(row[0])
+    assert raw_context["progress"][0]["happened_at"] == "2026-05-22 23:30"
+    assert "created_at" not in raw_context["progress"][0]
 
 
 def test_daily_generate_reports_empty_day(tmp_path: Path, monkeypatch) -> None:

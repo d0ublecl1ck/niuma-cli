@@ -56,6 +56,7 @@ def complete_todo(conn: Connection, todo_id: int) -> int:
         todo_id=todo["id"],
         source="todo_done",
         created_at=timestamp,
+        happened_at=timestamp,
     )
 
 

@@ -20,7 +20,7 @@ class SearchResult:
     title: str
     matched_field: str
     content: str | None
-    created_at: str | None
+    recorded_at: str | None
 
 
 def search_all(conn: Connection, config_store: ConfigStore, query: str, entity: str = "all") -> list[SearchResult]:
@@ -100,7 +100,7 @@ def _search_progress(conn: Connection, pattern: str) -> list[SearchResult]:
 
     rows = conn.execute(
         """
-        SELECT p.id, p.title, p.content, p.tag, p.source, p.created_at, pr.name AS project_name,
+        SELECT p.id, p.title, p.content, p.tag, p.source, p.happened_at, pr.name AS project_name,
                CASE
                    WHEN lower(p.title) LIKE lower(?) ESCAPE '\\' THEN 'title'
                    WHEN lower(COALESCE(p.content, '')) LIKE lower(?) ESCAPE '\\' THEN 'content'
@@ -115,14 +115,11 @@ def _search_progress(conn: Connection, pattern: str) -> list[SearchResult]:
            OR lower(p.tag) LIKE lower(?) ESCAPE '\\'
            OR lower(p.source) LIKE lower(?) ESCAPE '\\'
            OR lower(COALESCE(pr.name, '')) LIKE lower(?) ESCAPE '\\'
-        ORDER BY p.created_at ASC, p.id ASC
+        ORDER BY p.happened_at ASC, p.id ASC
         """,
         (pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern),
     )
-    return [
-        SearchResult("progress", str(row["id"]), row["title"], row["matched_field"], row["content"], row["created_at"])
-        for row in rows
-    ]
+    return [SearchResult("progress", str(row["id"]), row["title"], row["matched_field"], row["content"], row["happened_at"]) for row in rows]
 
 
 def _search_dailies(conn: Connection, pattern: str) -> list[SearchResult]:

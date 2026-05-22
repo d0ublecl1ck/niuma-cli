@@ -1,2 +1,4 @@
 - See docs/dev/config-recovery-and-tags.md for the configuration recovery and tag deletion regression note.
 - Always update the project skill when changing niuma-cli commands, behavior, tests, docs, or reusable workflow guidance.
+- After submitting a PR, reinstall niuma-cli for the system when the PR has no conflicts and can be merged.
+- After submitting a PR, if conflicts occur, reinstall niuma-cli for the system after resolving the conflicts.
